@@ -16,8 +16,20 @@ extern void ios_notifications_init(void);
 
 @implementation WailsAppDelegate
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-    // Set global appDelegate reference and bring up a window if needed
     appDelegate = self;
+    self.viewControllers = [NSMutableArray array];
+    // Notification registration must happen before application launch completes.
+    ios_notifications_init();
+    // Existing apps without a scene manifest keep the legacy launch path.
+    // Scene-enabled apps start Go only after their UIWindowScene is connected.
+    if (![NSBundle mainBundle].infoDictionary[@"UIApplicationSceneManifest"]) {
+        [self connectWindow:nil];
+    }
+    return YES;
+}
+
+- (void)connectWindow:(UIWindowScene *)scene {
+    // Set global appDelegate reference and bring up a window if needed
     if (self.window == nil) {
         // Start the window with the launch-screen colour (a "LaunchBackground"
         // colour asset, also referenced by UILaunchScreen) so there's no white
@@ -26,7 +38,8 @@ extern void ios_notifications_init(void);
         // so it can't colour the initial window. Falls back to white if the
         // asset isn't present.
         UIColor *launchBG = [UIColor colorNamed:@"LaunchBackground"] ?: [UIColor whiteColor];
-        self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+        self.window = scene ? [[UIWindow alloc] initWithWindowScene:scene]
+                            : [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
         self.window.backgroundColor = launchBG;
         UIViewController *rootVC = [[UIViewController alloc] init];
         rootVC.view.backgroundColor = launchBG;
@@ -44,28 +57,18 @@ extern void ios_notifications_init(void);
         self.window.backgroundColor = color;
         self.window.rootViewController.view.backgroundColor = color;
     }
-    if (!self.viewControllers) {
-        self.viewControllers = [NSMutableArray array];
+    // Retain the existing root controller if UIKit reconnects the scene.
+    if (scene && self.window.windowScene != scene) {
+        self.window.windowScene = scene;
     }
-    // Register the notification-center delegate before launch finishes so local
-    // notifications appear while the app is foregrounded (otherwise iOS delivers
-    // them silently and no banner is shown).
-    ios_notifications_init();
-    // Unconditional launch signal for the Go runtime. platformRun waits on
-    // this and emits ApplicationDidFinishLaunching from the Go side once the
-    // event listeners are wired up - emitting it from here would race the Go
-    // runtime's startup and the event could be dropped.
-    // Start the Go runtime NOW — only after UIKit has delivered the launch and
-    // the window exists. Starting Go earlier (concurrently with UIApplicationMain)
-    // intermittently corrupts the FrontBoard launch handshake on a physical
-    // device, so this method never fires (blank cold launch / 0x8BADF00D). Run it
-    // on a background thread so app.Run()'s blocking loop never touches the main
-    // thread. WailsIOSMain -> user main() -> app.Run(); the window's run() then
-    // creates the WebView (appDelegate/window are already set above).
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        WailsIOSMain();
+    [self.window makeKeyAndVisible];
+    // Scene reconnection must never start a second Go application.
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            WailsIOSMain();
+        });
     });
-    return YES;
 }
 // GENERATED EVENTS START
 - (void)applicationDidBecomeActive:(UIApplication *)application {
@@ -111,4 +114,32 @@ extern void ios_notifications_init(void);
 }
 
 // GENERATED EVENTS END
+@end
+
+// Wails currently owns one native window. Multiple scenes are disabled in the
+// manifest; keep the app delegate's window reference for existing native APIs.
+@implementation WailsSceneDelegate
+- (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session
+      options:(UISceneConnectionOptions *)connectionOptions {
+    if (![scene isKindOfClass:[UIWindowScene class]]) return;
+    WailsAppDelegate *delegate = (WailsAppDelegate *)UIApplication.sharedApplication.delegate;
+    [delegate connectWindow:(UIWindowScene *)scene];
+    self.window = delegate.window;
+}
+
+- (void)sceneDidBecomeActive:(UIScene *)scene {
+    [appDelegate applicationDidBecomeActive:UIApplication.sharedApplication];
+}
+
+- (void)sceneWillResignActive:(UIScene *)scene {
+    [appDelegate applicationWillResignActive:UIApplication.sharedApplication];
+}
+
+- (void)sceneDidEnterBackground:(UIScene *)scene {
+    [appDelegate applicationDidEnterBackground:UIApplication.sharedApplication];
+}
+
+- (void)sceneWillEnterForeground:(UIScene *)scene {
+    [appDelegate applicationWillEnterForeground:UIApplication.sharedApplication];
+}
 @end

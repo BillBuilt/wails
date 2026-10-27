@@ -9,7 +9,12 @@
 
 @interface WailsAppDelegate : UIResponder <UIApplicationDelegate>
 @property (strong, nonatomic) UIWindow *window;
+- (void)connectWindow:(UIWindowScene *)scene;
 @property (nonatomic, strong) NSMutableArray<WailsViewController *> *viewControllers;
+@end
+
+@interface WailsSceneDelegate : UIResponder <UIWindowSceneDelegate>
+@property (strong, nonatomic) UIWindow *window;
 @end
 
 #endif /* application_ios_delegate_h */

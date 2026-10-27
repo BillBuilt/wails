@@ -48,8 +48,8 @@ func init_go() {
 	// Called from the iOS main function to initialize the Go runtime.
 }
 
-// iosLaunched is closed when UIApplicationDelegate's
-// didFinishLaunchingWithOptions fires, signalling that UIKit is ready.
+// iosLaunched is closed after native window setup and Go application startup.
+// Scene-enabled apps wait for their UIWindowScene to connect first.
 var (
 	iosLaunched     = make(chan struct{})
 	iosLaunchedOnce sync.Once
@@ -70,9 +70,9 @@ func (a *App) platformRun() {
 
 	C.ios_app_init()
 
-	// The Go runtime is started by the UIApplication delegate's
-	// didFinishLaunchingWithOptions (see application_ios_delegate.m), so by the
-	// time we get here UIKit has already launched and appDelegate/window exist.
+	// The native delegate starts Go after connecting the scene's window (or
+	// after legacy window setup for apps without a scene manifest), so
+	// appDelegate/window already exist here.
 	// Release the window-creation waiter and keep the runtime alive. The OS main
 	// thread is owned by UIApplicationMain (in main.m); this runs on the
 	// background goroutine the delegate started.
